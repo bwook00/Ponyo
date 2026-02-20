@@ -11,17 +11,17 @@ struct PaneSlot: Codable, Identifiable {
     var id: String { paneId }
     let paneId: String
     var agent: Agent
-    var issue: Issue?
+    var taskItem: TaskItem?
     var status: PaneStatus = .idle
 
-    var worktreePath: String? {
-        issue?.worktreePath
-    }
-
     var tmuxTitle: String? {
-        guard let issue else { return nil }
+        guard let taskItem else { return nil }
+        if taskItem.isGroup {
+            return "\(agent.displayName) | \(taskItem.displayName) (\(taskItem.issues.count) issues)"
+        }
+        guard let issue = taskItem.issues.first else { return nil }
         return "\(agent.displayName) | \(issue.repo.name) | \(issue.branchName) | \(issue.displayTitle)"
     }
 
-    var isEmpty: Bool { issue == nil }
+    var isEmpty: Bool { taskItem == nil }
 }

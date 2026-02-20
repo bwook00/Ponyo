@@ -22,7 +22,7 @@ actor StateStore {
 
     func load() async throws -> AppState {
         guard FileManager.default.fileExists(atPath: filePath) else {
-            return AppState(repos: [], taskPool: [], paneSlots: [])
+            return AppState(repos: [], taskPool: [], todayTasks: [], paneSlots: [])
         }
         let data = try Data(contentsOf: URL(fileURLWithPath: filePath))
         return try JSONDecoder().decode(AppState.self, from: data)

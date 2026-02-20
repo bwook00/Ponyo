@@ -17,11 +17,21 @@ struct AgentLauncher {
         return "\(agent.command) \"\(prompt)\""
     }
 
-    /// 이슈를 페인에 배치하고 Agent 실행
+    static func buildGroupCommand(agent: Agent, taskItem: TaskItem) -> String {
+        var lines = taskItem.issues.map { "#\($0.number): \($0.title)" }
+        if let groupName = taskItem.groupName {
+            lines.insert("Task Group: \(groupName)", at: 0)
+        }
+        let prompt = lines.joined(separator: "\n")
+            .replacingOccurrences(of: "'", with: "'\\''")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "\(agent.command) \"\(prompt)\""
+    }
+
+    /// 단일 이슈 실행
     func launch(paneId: String, agent: Agent, issue: Issue) async throws {
         let worktreePath = issue.worktreePath
 
-        // 1. worktree가 없으면 생성
         let exists = try await git.worktreeExists(
             repoPath: issue.repo.localPath,
             targetPath: worktreePath
@@ -34,20 +44,47 @@ struct AgentLauncher {
             )
         }
 
-        // 2. 디렉토리 이동
         try await tmux.sendKeys(paneId, keys: "cd \(worktreePath)")
-
-        // 3. 잠시 대기 후 Agent 실행
         try await Task.sleep(for: .milliseconds(500))
         let command = Self.buildCommand(agent: agent, issue: issue)
         try await tmux.sendKeys(paneId, keys: command)
 
-        // 4. 페인 타이틀 설정
         let title = "\(agent.displayName) | \(issue.repo.name) | \(issue.branchName) | \(issue.displayTitle)"
         try await tmux.setPaneTitle(paneId, title: title)
     }
 
-    /// Agent 중단
+    /// TaskItem (그룹 포함) 실행
+    func launchTaskItem(paneId: String, agent: Agent, taskItem: TaskItem) async throws {
+        if taskItem.isSingle, let issue = taskItem.issues.first {
+            try await launch(paneId: paneId, agent: agent, issue: issue)
+            return
+        }
+
+        // 그룹: 첫 번째 이슈의 repo 기준으로 worktree 생성
+        guard let firstIssue = taskItem.issues.first else { return }
+
+        let worktreePath = firstIssue.worktreePath
+        let exists = try await git.worktreeExists(
+            repoPath: firstIssue.repo.localPath,
+            targetPath: worktreePath
+        )
+        if !exists {
+            try await git.addWorktree(
+                repoPath: firstIssue.repo.localPath,
+                branchName: firstIssue.branchName,
+                targetPath: worktreePath
+            )
+        }
+
+        try await tmux.sendKeys(paneId, keys: "cd \(worktreePath)")
+        try await Task.sleep(for: .milliseconds(500))
+        let command = Self.buildGroupCommand(agent: agent, taskItem: taskItem)
+        try await tmux.sendKeys(paneId, keys: command)
+
+        let title = "\(agent.displayName) | \(taskItem.displayName) (\(taskItem.issues.count) issues)"
+        try await tmux.setPaneTitle(paneId, title: title)
+    }
+
     func stop(paneId: String) async throws {
         try await tmux.sendCtrlC(paneId)
     }

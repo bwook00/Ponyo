@@ -4,7 +4,7 @@ import SwiftUI
 struct PaneGridView: View {
     @ObservedObject var vm: DashboardViewModel
     @State private var showAgentPicker = false
-    @State private var pendingDrop: (issueId: String, paneIndex: Int)?
+    @State private var pendingDrop: (taskItemId: String, paneIndex: Int)?
     @State private var selectedAgent: Agent = .claudeCode
 
     private let columns = [
@@ -17,6 +17,14 @@ struct PaneGridView: View {
                 Label("Panes", systemImage: "rectangle.split.2x2")
                     .font(.headline)
                 Spacer()
+                if !vm.terminalLaunched {
+                    Button(action: { Task { await vm.launchTerminal() } }) {
+                        Label("Launch Terminal", systemImage: "terminal")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
                 statusSummary
             }
 
@@ -26,12 +34,13 @@ struct PaneGridView: View {
                         PaneCardView(
                             slot: slot,
                             paneIndex: index,
-                            onReturn: { Task { await vm.returnToPool(paneIndex: index) } },
-                            onComplete: { Task { await vm.completeTask(paneIndex: index) } }
+                            onReturn: { Task { await vm.returnToToday(paneIndex: index) } },
+                            onComplete: { Task { await vm.completeTask(paneIndex: index) } },
+                            onRestart: slot.taskItem != nil ? { Task { await vm.restartAgent(paneIndex: index) } } : nil
                         )
                         .dropDestination(for: String.self) { items, _ in
-                            guard let issueId = items.first, slot.isEmpty else { return false }
-                            pendingDrop = (issueId, index)
+                            guard let taskItemId = items.first, slot.isEmpty else { return false }
+                            pendingDrop = (taskItemId, index)
                             showAgentPicker = true
                             return true
                         }
@@ -62,9 +71,9 @@ struct PaneGridView: View {
                 selectedAgent: $selectedAgent,
                 onLaunch: {
                     guard let drop = pendingDrop,
-                          let issue = vm.state.taskPool.first(where: { $0.id == drop.issueId })
+                          let taskItem = vm.state.todayTasks.first(where: { $0.id == drop.taskItemId })
                     else { return }
-                    Task { await vm.assignIssue(issue, toPaneAt: drop.paneIndex, agent: selectedAgent) }
+                    Task { await vm.assignTask(taskItem, toPaneAt: drop.paneIndex, agent: selectedAgent) }
                     showAgentPicker = false
                     pendingDrop = nil
                 },

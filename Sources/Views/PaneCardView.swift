@@ -6,6 +6,7 @@ struct PaneCardView: View {
     let paneIndex: Int
     let onReturn: () -> Void
     let onComplete: () -> Void
+    var onRestart: (() -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -28,19 +29,49 @@ struct PaneCardView: View {
                     .foregroundStyle(.secondary)
             }
 
-            if let issue = slot.issue {
-                Text(issue.repo.name)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Text(issue.displayTitle)
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                    .lineLimit(2)
-                Text(issue.branchName)
-                    .font(.caption2)
-                    .foregroundStyle(.blue)
+            if let taskItem = slot.taskItem {
+                if taskItem.isGroup {
+                    // Group display
+                    HStack(spacing: 4) {
+                        Image(systemName: "rectangle.stack.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                        Text(taskItem.displayName)
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                    }
+                    ForEach(taskItem.issues) { issue in
+                        Text(issue.displayTitle)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                } else if let issue = taskItem.issues.first {
+                    // Single issue display
+                    Text(issue.repo.name)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text(issue.displayTitle)
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .lineLimit(2)
+                    Text(issue.branchName)
+                        .font(.caption2)
+                        .foregroundStyle(.blue)
+                }
 
                 HStack {
+                    if slot.status == .crashed || slot.status == .idle {
+                        if let onRestart {
+                            Button(action: onRestart) {
+                                Label("Restart", systemImage: "arrow.clockwise")
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(.orange)
+                        }
+                    }
+
                     Button(action: onReturn) {
                         Label("Return", systemImage: "arrow.uturn.backward")
                             .font(.caption)

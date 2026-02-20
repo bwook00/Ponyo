@@ -4,20 +4,61 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var vm: DashboardViewModel
     @State private var token: String = ""
-    @State private var newRepoOwner = ""
-    @State private var newRepoName = ""
-    @State private var newRepoPath = ""
+    @State private var showToken = false
 
     var body: some View {
         Form {
-            Section("GitHub") {
-                SecureField("Personal Access Token", text: $token)
-                Button("Save Token") {
-                    KeychainHelper.save(key: "github-token", value: token)
+            Section("GitHub Token") {
+                HStack(spacing: 8) {
+                    if showToken {
+                        TextField("Personal Access Token", text: $token)
+                    } else {
+                        SecureField("Personal Access Token", text: $token)
+                    }
+                    Button(action: { showToken.toggle() }) {
+                        Image(systemName: showToken ? "eye.slash" : "eye")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+                HStack {
+                    Button("Save Token") {
+                        KeychainHelper.save(key: "github-token", value: token)
+                        vm.refreshGitHubToken()
+                    }
+                    Spacer()
+                    Button("Generate Token on GitHub") {
+                        NSWorkspace.shared.open(URL(string: "https://github.com/settings/tokens/new?scopes=repo&description=Ponyo")!)
+                    }
+                    .buttonStyle(.link)
+                    .font(.caption)
+                }
+            }
+
+            Section("Terminal") {
+                Picker("Terminal App", selection: $vm.state.terminalApp) {
+                    Text("Ghostty").tag("Ghostty")
+                    Text("iTerm").tag("iTerm")
+                    Text("Terminal").tag("Terminal")
+                }
+                .pickerStyle(.radioGroup)
+
+                if !vm.state.githubUsername.isEmpty {
+                    HStack {
+                        Text("GitHub:")
+                            .foregroundStyle(.secondary)
+                        Text("@\(vm.state.githubUsername)")
+                    }
+                    .font(.caption)
                 }
             }
 
             Section("Repositories") {
+                if vm.state.repos.isEmpty {
+                    Text("No repos added. Use the + button in the dashboard.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 ForEach(vm.state.repos) { repo in
                     HStack {
                         Text(repo.id)
@@ -26,38 +67,16 @@ struct SettingsView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Button(role: .destructive) {
-                            vm.state.repos.removeAll { $0.id == repo.id }
+                            Task { await vm.removeRepo(repo) }
                         } label: {
                             Image(systemName: "trash")
                         }
                     }
                 }
-
-                HStack {
-                    TextField("owner", text: $newRepoOwner)
-                        .frame(width: 100)
-                    Text("/")
-                    TextField("repo", text: $newRepoName)
-                        .frame(width: 100)
-                    TextField("local path", text: $newRepoPath)
-                    Button("Add") {
-                        let repo = RepoConfig(
-                            owner: newRepoOwner,
-                            name: newRepoName,
-                            localPath: newRepoPath
-                        )
-                        vm.state.repos.append(repo)
-                        newRepoOwner = ""
-                        newRepoName = ""
-                        newRepoPath = ""
-                        Task { try? await vm.stateStore.save(vm.state) }
-                    }
-                    .disabled(newRepoOwner.isEmpty || newRepoName.isEmpty || newRepoPath.isEmpty)
-                }
             }
         }
         .padding()
-        .frame(width: 500, height: 400)
+        .frame(width: 500, height: 450)
         .onAppear {
             token = KeychainHelper.load(key: "github-token") ?? ""
         }

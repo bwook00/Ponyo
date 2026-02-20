@@ -3,10 +3,11 @@ import SwiftUI
 
 struct MenuBarView: View {
     @ObservedObject var vm: DashboardViewModel
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Tasks: \(vm.state.taskPool.count) remaining")
+            Text("Today: \(vm.state.todayTasks.count) tasks")
                 .font(.headline)
 
             let running = vm.state.paneSlots.filter { $0.status == .running }.count
@@ -37,6 +38,7 @@ struct MenuBarView: View {
             Divider()
 
             Button("Open Dashboard") {
+                openWindow(id: "dashboard")
                 NSApp.activate(ignoringOtherApps: true)
             }
 
@@ -45,6 +47,10 @@ struct MenuBarView: View {
             }
 
             Divider()
+
+            SettingsLink {
+                Text("Settings...")
+            }
 
             Button("Quit Ponyo") {
                 NSApplication.shared.terminate(nil)

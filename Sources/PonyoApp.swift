@@ -1,8 +1,23 @@
 // Sources/PonyoApp.swift
 import SwiftUI
 
+class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        // 창이 뜰 때마다 key window로 만들어서 키보드 입력 보장
+        if let window = NSApp.windows.first(where: { $0.isVisible && $0.canBecomeKey }) {
+            window.makeKeyAndOrderFront(nil)
+        }
+    }
+}
+
 @main
 struct PonyoApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var vm: DashboardViewModel
 
     init() {
@@ -23,14 +38,15 @@ struct PonyoApp: App {
     }
 
     var body: some Scene {
+        Window("Ponyo Dashboard", id: "dashboard") {
+            DashboardView(vm: vm)
+                .task { await vm.initialize() }
+        }
+        .defaultSize(width: 1100, height: 650)
+
         MenuBarExtra("Ponyo", systemImage: "fish") {
             MenuBarView(vm: vm)
         }
-
-        Window("Ponyo Dashboard", id: "dashboard") {
-            DashboardView(vm: vm)
-        }
-        .defaultSize(width: 900, height: 600)
 
         Settings {
             SettingsView(vm: vm)
