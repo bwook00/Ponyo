@@ -1,9 +1,6 @@
-// Tests/PonyoTests/PonyoTests.swift
-import XCTest
+import Testing
 
-final class PonyoTests: XCTestCase {
-    func testPonyoAppExists() {
-        // Placeholder test to verify test target compiles
-        XCTAssertTrue(true)
-    }
+@Test func ponyoAppExists() {
+    // Placeholder test to verify test target compiles
+    #expect(true)
 }
