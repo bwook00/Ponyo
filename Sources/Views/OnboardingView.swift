@@ -5,7 +5,6 @@ struct OnboardingView: View {
     @ObservedObject var vm: DashboardViewModel
     @State private var token = ""
     @State private var showToken = false
-    @Binding var isPresented: Bool
 
     var body: some View {
         VStack(spacing: 24) {
@@ -17,7 +16,7 @@ struct OnboardingView: View {
                 .font(.title)
                 .fontWeight(.bold)
 
-            Text("Enter your GitHub Personal Access Token to get started.\nYou can add repositories from the dashboard.")
+            Text("Enter your GitHub Personal Access Token to get started.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -45,15 +44,15 @@ struct OnboardingView: View {
             .frame(maxWidth: 320)
 
             Button("Get Started") {
-                KeychainHelper.save(key: "github-token", value: token)
+                vm.state.githubToken = token
                 vm.refreshGitHubToken()
-                isPresented = false
+                Task { await vm.initialize() }
             }
             .disabled(token.isEmpty)
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
         }
         .padding(40)
-        .frame(width: 480, height: 380)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

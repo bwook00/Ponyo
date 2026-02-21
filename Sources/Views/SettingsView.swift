@@ -23,7 +23,7 @@ struct SettingsView: View {
                 }
                 HStack {
                     Button("Save Token") {
-                        KeychainHelper.save(key: "github-token", value: token)
+                        vm.state.githubToken = token
                         vm.refreshGitHubToken()
                     }
                     Spacer()
@@ -35,21 +35,14 @@ struct SettingsView: View {
                 }
             }
 
-            Section("Terminal") {
-                Picker("Terminal App", selection: $vm.state.terminalApp) {
-                    Text("Ghostty").tag("Ghostty")
-                    Text("iTerm").tag("iTerm")
-                    Text("Terminal").tag("Terminal")
-                }
-                .pickerStyle(.radioGroup)
-
-                if !vm.state.githubUsername.isEmpty {
+            if !vm.state.githubUsername.isEmpty {
+                Section("GitHub") {
                     HStack {
-                        Text("GitHub:")
+                        Text("Logged in as")
                             .foregroundStyle(.secondary)
                         Text("@\(vm.state.githubUsername)")
+                            .fontWeight(.medium)
                     }
-                    .font(.caption)
                 }
             }
 
@@ -78,7 +71,7 @@ struct SettingsView: View {
         .padding()
         .frame(width: 500, height: 450)
         .onAppear {
-            token = KeychainHelper.load(key: "github-token") ?? ""
+            token = vm.state.githubToken
         }
     }
 }

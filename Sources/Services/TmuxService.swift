@@ -29,6 +29,12 @@ actor TmuxService {
 
     func createSession() async throws {
         _ = try await shell.runCommand("tmux", arguments: ["new-session", "-d", "-s", session])
+        // pane 상단에 커스텀 타이틀 표시 (#{@ponyo} — agent가 덮어쓸 수 없음)
+        _ = try? await shell.runCommand("tmux", arguments: ["set-window-option", "-t", session, "pane-border-status", "top"])
+        _ = try? await shell.runCommand("tmux", arguments: ["set-window-option", "-t", session, "pane-border-format", " #[bold,fg=colour75]#{@ponyo} "])
+        _ = try? await shell.runCommand("tmux", arguments: ["set-option", "-t", session, "pane-border-lines", "heavy"])
+        _ = try? await shell.runCommand("tmux", arguments: ["set-option", "-t", session, "pane-border-style", "fg=colour245"])
+        _ = try? await shell.runCommand("tmux", arguments: ["set-option", "-t", session, "pane-active-border-style", "fg=colour39,bold"])
     }
 
     func killSession() async throws {
@@ -51,7 +57,11 @@ actor TmuxService {
 
     func createPane() async throws -> String {
         let output = try await shell.runCommand(
-            "tmux", arguments: ["split-window", "-t", session, "-P", "-F", "#{pane_id}"]
+            "tmux", arguments: ["split-window", "-h", "-t", session, "-P", "-F", "#{pane_id}"]
+        )
+        // 균등 배치
+        _ = try? await shell.runCommand(
+            "tmux", arguments: ["select-layout", "-t", session, "even-horizontal"]
         )
         return output.trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -68,7 +78,7 @@ actor TmuxService {
 
     func setPaneTitle(_ paneId: String, title: String) async throws {
         _ = try await shell.runCommand(
-            "tmux", arguments: ["select-pane", "-t", paneId, "-T", title]
+            "tmux", arguments: ["set-option", "-p", "-t", paneId, "@ponyo", title]
         )
     }
 

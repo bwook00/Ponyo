@@ -40,4 +40,12 @@ actor GitService {
             (path as NSString).resolvingSymlinksInPath == resolvedTarget
         }
     }
+
+    /// 브랜치 생성 (이미 있으면 무시)
+    func createBranch(repoPath: String, branchName: String) async throws {
+        _ = try? await shell.runCommand(
+            "git", arguments: ["branch", branchName],
+            workingDirectory: repoPath
+        )
+    }
 }

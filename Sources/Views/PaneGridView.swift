@@ -7,26 +7,23 @@ struct PaneGridView: View {
     @State private var pendingDrop: (taskItemId: String, paneIndex: Int)?
     @State private var selectedAgent: Agent = .claudeCode
 
-    private let columns = [
-        GridItem(.adaptive(minimum: 220, maximum: 300), spacing: 12)
-    ]
-
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Label("Panes", systemImage: "rectangle.split.2x2")
                     .font(.headline)
                 Spacer()
-                if !vm.terminalLaunched {
-                    Button(action: { Task { await vm.launchTerminal() } }) {
-                        Label("Launch Terminal", systemImage: "terminal")
-                            .font(.caption)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
+                Button(action: { Task { await vm.launchTerminal() } }) {
+                    Label(vm.terminalLaunched ? "Relaunch" : "Launch Terminal", systemImage: "terminal")
+                        .font(.caption)
                 }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
                 statusSummary
             }
+
+            // 가로 배치 — max 4 columns, wraps to next row
+            let columns = Array(repeating: GridItem(.flexible(minimum: 180), spacing: 12), count: min(max(vm.state.paneSlots.count, 1), 4))
 
             ScrollView {
                 LazyVGrid(columns: columns, spacing: 12) {
@@ -36,7 +33,8 @@ struct PaneGridView: View {
                             paneIndex: index,
                             onReturn: { Task { await vm.returnToToday(paneIndex: index) } },
                             onComplete: { Task { await vm.completeTask(paneIndex: index) } },
-                            onRestart: slot.taskItem != nil ? { Task { await vm.restartAgent(paneIndex: index) } } : nil
+                            onRestart: slot.taskItem != nil ? { Task { await vm.restartAgent(paneIndex: index) } } : nil,
+                            onDelete: { Task { await vm.removePane(at: index) } }
                         )
                         .dropDestination(for: String.self) { items, _ in
                             guard let taskItemId = items.first, slot.isEmpty else { return false }
@@ -49,11 +47,11 @@ struct PaneGridView: View {
                     Button(action: { Task { await vm.addPane() } }) {
                         VStack {
                             Image(systemName: "plus.rectangle")
-                                .font(.title)
+                                .font(.title2)
                             Text("Add Pane")
                                 .font(.caption)
                         }
-                        .frame(maxWidth: .infinity, minHeight: 120)
+                        .frame(maxWidth: .infinity, minHeight: 100)
                         .background(.secondary.opacity(0.05))
                         .cornerRadius(10)
                         .overlay(

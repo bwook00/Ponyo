@@ -8,6 +8,7 @@ final class DashboardViewModel: ObservableObject {
     @Published var availableRepos: [GitHubRepoInfo] = []
     @Published var isLoadingRepos = false
     @Published var terminalLaunched = false
+    @Published var isInitialized = false
 
     let tmux: TmuxService
     let git: GitService
@@ -39,28 +40,25 @@ final class DashboardViewModel: ObservableObject {
             state = loaded
         }
 
-        let exists = (try? await tmux.sessionExists()) ?? false
-        if !exists {
-            try? await tmux.createSession()
-        }
+        isInitialized = true
+
+        guard !state.githubToken.isEmpty else { return }
+
+        github = GitHubService(token: state.githubToken)
 
         monitor.start()
 
-        let hasToken = KeychainHelper.load(key: "github-token") != nil
-        if hasToken {
-            await ensureGitHubUsername()
-            if !state.repos.isEmpty {
-                await fetchIssues()
-            }
+        await ensureGitHubUsername()
+        if !state.repos.isEmpty {
+            await fetchIssues()
         }
     }
 
     func refreshGitHubToken() {
-        let token = KeychainHelper.load(key: "github-token") ?? ""
-        github = GitHubService(token: token)
+        github = GitHubService(token: state.githubToken)
+        Task { try? await stateStore.save(state) }
     }
 
-    /// GitHub username 캐시 (auto-assign용)
     func ensureGitHubUsername() async {
         guard state.githubUsername.isEmpty else { return }
         if let username = try? await github.fetchCurrentUser() {
@@ -71,49 +69,68 @@ final class DashboardViewModel: ObservableObject {
 
     // MARK: - Terminal
 
-    /// Ghostty(또는 설정된 터미널)를 tmux 세션에 attach하여 실행
+    /// Ghostty + tmux 세션을 새로 만들고 pane 세팅 (기존 task 할당 유지)
     func launchTerminal() async {
-        // tmux 세션 확인/생성
+        // 1. 기존 세션 죽이고 새로 생성
         let exists = (try? await tmux.sessionExists()) ?? false
-        if !exists {
-            try? await tmux.createSession()
+        if exists {
+            try? await tmux.killSession()
+        }
+        try? await tmux.createSession()
+
+        // 2. 기존 task 할당 보존
+        let savedSlots = state.paneSlots
+        let paneCount = max(savedSlots.count, 4)
+        state.paneSlots.removeAll()
+
+        // 세션 생성 시 자동 생성된 첫 pane
+        if let panes = try? await tmux.listPanes(), let first = panes.first {
+            var slot = PaneSlot(paneId: first.id, agent: .claudeCode)
+            if savedSlots.indices.contains(0) {
+                slot.taskItem = savedSlots[0].taskItem
+                slot.agent = savedSlots[0].agent
+                slot.status = savedSlots[0].taskItem != nil ? .running : .idle
+            }
+            state.paneSlots.append(slot)
         }
 
+        // 나머지 pane 추가
+        for i in 1..<paneCount {
+            if let paneId = try? await tmux.createPane() {
+                var slot = PaneSlot(paneId: paneId, agent: .claudeCode)
+                if savedSlots.indices.contains(i) {
+                    slot.taskItem = savedSlots[i].taskItem
+                    slot.agent = savedSlots[i].agent
+                    slot.status = savedSlots[i].taskItem != nil ? .running : .idle
+                }
+                state.paneSlots.append(slot)
+            } else {
+                break
+            }
+        }
+        try? await stateStore.save(state)
+
+        // 3. Ghostty 실행
         let shell = ShellRunner()
-        let app = state.terminalApp
         let session = state.tmuxSession
-
-        // 터미널 앱 실행 + tmux attach
-        switch app {
-        case "Ghostty":
-            // Ghostty: open -a 로 실행 후, tmux attach 명령을 보냄
-            _ = try? await shell.runCommand(
-                "open", arguments: ["-a", "Ghostty", "--args", "-e", "tmux new-session -A -s \(session)"]
-            )
-        case "iTerm":
-            _ = try? await shell.runCommand(
-                "open", arguments: ["-a", "iTerm"]
-            )
-            try? await Task.sleep(for: .seconds(1))
-            // iTerm에서 tmux attach
-            _ = try? await shell.runCommand(
-                "osascript", arguments: [
-                    "-e", "tell application \"iTerm\" to tell current session of current window to write text \"tmux new-session -A -s \(session)\""
-                ]
-            )
-        default: // Terminal.app
-            _ = try? await shell.runCommand(
-                "open", arguments: ["-a", "Terminal"]
-            )
-            try? await Task.sleep(for: .seconds(1))
-            _ = try? await shell.runCommand(
-                "osascript", arguments: [
-                    "-e", "tell application \"Terminal\" to do script \"tmux new-session -A -s \(session)\" in front window"
-                ]
-            )
-        }
+        try? await shell.launch(
+            "/Applications/Ghostty.app/Contents/MacOS/ghostty",
+            arguments: ["-e", "/bin/sh", "-c", "tmux attach -t \(session)"]
+        )
 
         terminalLaunched = true
+
+        // 4. 각 pane에 타이틀 설정 + task 할당된 pane에 agent 재실행
+        try? await Task.sleep(for: .seconds(1))
+        for i in state.paneSlots.indices {
+            if let taskItem = state.paneSlots[i].taskItem {
+                let paneId = state.paneSlots[i].paneId
+                let agent = state.paneSlots[i].agent
+                try? await launcher.launchTaskItem(paneId: paneId, paneIndex: i, agent: agent, taskItem: taskItem)
+            } else {
+                try? await launcher.setIdleTitle(paneId: state.paneSlots[i].paneId, paneIndex: i)
+            }
+        }
     }
 
     // MARK: - Repo Management
@@ -137,11 +154,9 @@ final class DashboardViewModel: ObservableObject {
     func removeRepo(_ repo: RepoConfig) async {
         state.repos.removeAll { $0.id == repo.id }
         state.taskPool.removeAll { $0.repo.id == repo.id }
-        // todayTasks에서도 해당 레포 이슈 제거
         state.todayTasks.removeAll { item in
             item.issues.allSatisfy { $0.repo.id == repo.id }
         }
-        // 그룹 안의 부분 이슈도 정리
         for i in state.todayTasks.indices {
             state.todayTasks[i].issues.removeAll { $0.repo.id == repo.id }
         }
@@ -197,7 +212,6 @@ final class DashboardViewModel: ObservableObject {
     }
 
     func issuesForRepo(_ repo: RepoConfig) -> [Issue] {
-        // taskPool에서 아직 todayTasks나 pane에 안 들어간 것만 표시
         let pickedIds = Set(
             state.todayTasks.flatMap { $0.issues.map(\.id) }
             + state.paneSlots.compactMap { $0.taskItem }.flatMap { $0.issues.map(\.id) }
@@ -208,7 +222,6 @@ final class DashboardViewModel: ObservableObject {
 
     // MARK: - Today's Tasks (Step 1: Pick)
 
-    /// 이슈를 오늘의 할일로 추가 + GitHub에서 나를 assign
     func pickForToday(_ issue: Issue) {
         let alreadyPicked = state.todayTasks.flatMap(\.issues).contains(where: { $0.id == issue.id })
         guard !alreadyPicked else { return }
@@ -216,7 +229,6 @@ final class DashboardViewModel: ObservableObject {
         state.todayTasks.append(item)
         Task {
             try? await stateStore.save(state)
-            // GitHub에서 나를 assign
             if !state.githubUsername.isEmpty {
                 try? await github.assignIssue(
                     repo: issue.repo,
@@ -227,27 +239,21 @@ final class DashboardViewModel: ObservableObject {
         }
     }
 
-    /// 오늘의 할일에서 제거 (taskPool로 돌아감)
     func removeFromToday(_ taskItem: TaskItem) {
         state.todayTasks.removeAll { $0.id == taskItem.id }
         Task { try? await stateStore.save(state) }
     }
 
-    /// 여러 TaskItem을 그룹으로 묶기
     func groupTasks(_ itemIds: Set<String>, name: String) {
         let items = state.todayTasks.filter { itemIds.contains($0.id) }
         let allIssues = items.flatMap(\.issues)
         guard allIssues.count >= 2 else { return }
-
-        // 기존 항목 제거
         state.todayTasks.removeAll { itemIds.contains($0.id) }
-        // 새 그룹 생성
         let group = TaskItem(issues: allIssues, groupName: name)
         state.todayTasks.append(group)
         Task { try? await stateStore.save(state) }
     }
 
-    /// 그룹 해제 → 개별 TaskItem으로 분리
     func ungroupTask(_ taskItem: TaskItem) {
         guard taskItem.isGroup else { return }
         state.todayTasks.removeAll { $0.id == taskItem.id }
@@ -260,18 +266,35 @@ final class DashboardViewModel: ObservableObject {
     // MARK: - Pane Management (Step 2: Assign)
 
     func addPane() async {
-        // 첫 pane 생성 시 터미널 자동 실행
-        if !terminalLaunched {
-            await launchTerminal()
-            try? await Task.sleep(for: .seconds(2))
+        if terminalLaunched {
+            if let paneId = try? await tmux.createPane() {
+                state.paneSlots.append(PaneSlot(paneId: paneId, agent: .claudeCode))
+                try? await stateStore.save(state)
+            }
+        } else {
+            state.paneSlots.append(PaneSlot(paneId: "pending-\(UUID().uuidString.prefix(8))", agent: .claudeCode))
+            try? await stateStore.save(state)
+        }
+    }
+
+    /// Pane 삭제
+    func removePane(at index: Int) async {
+        guard index < state.paneSlots.count else { return }
+        let slot = state.paneSlots[index]
+
+        // task 있으면 todayTasks로 돌림
+        if let taskItem = slot.taskItem {
+            try? await launcher.stop(paneId: slot.paneId)
+            state.todayTasks.append(taskItem)
         }
 
-        do {
-            let paneId = try await tmux.createPane()
-            let slot = PaneSlot(paneId: paneId, agent: .claudeCode)
-            state.paneSlots.append(slot)
-            try? await stateStore.save(state)
-        } catch {}
+        // tmux pane 삭제
+        if terminalLaunched {
+            try? await tmux.killPane(slot.paneId)
+        }
+
+        state.paneSlots.remove(at: index)
+        try? await stateStore.save(state)
     }
 
     /// TaskItem을 Pane에 할당
@@ -286,9 +309,11 @@ final class DashboardViewModel: ObservableObject {
         state.paneSlots[index].agent = agent
         state.paneSlots[index].status = .running
 
-        // Agent 실행
-        let paneId = state.paneSlots[index].paneId
-        try? await launcher.launchTaskItem(paneId: paneId, agent: agent, taskItem: taskItem)
+        // 터미널 열려있으면 바로 실행
+        if terminalLaunched {
+            let paneId = state.paneSlots[index].paneId
+            try? await launcher.launchTaskItem(paneId: paneId, paneIndex: index, agent: agent, taskItem: taskItem)
+        }
 
         // GitHub 라벨 추가
         for issue in taskItem.issues {
@@ -306,7 +331,6 @@ final class DashboardViewModel: ObservableObject {
         let paneId = state.paneSlots[paneIndex].paneId
         try? await launcher.stop(paneId: paneId)
 
-        // todayTasks로 돌림
         state.todayTasks.append(taskItem)
         state.paneSlots[paneIndex].taskItem = nil
         state.paneSlots[paneIndex].status = .idle
@@ -318,7 +342,7 @@ final class DashboardViewModel: ObservableObject {
         try? await stateStore.save(state)
     }
 
-    /// 완료: worktree 삭제, 페인 삭제
+    /// 완료
     func completeTask(paneIndex: Int) async {
         guard paneIndex < state.paneSlots.count,
               let taskItem = state.paneSlots[paneIndex].taskItem else { return }
@@ -326,13 +350,13 @@ final class DashboardViewModel: ObservableObject {
         let paneId = state.paneSlots[paneIndex].paneId
         try? await launcher.stop(paneId: paneId)
 
-        // 각 이슈의 worktree 삭제
         for issue in taskItem.issues {
-            try? await git.removeWorktree(repoPath: issue.repo.localPath, worktreePath: issue.worktreePath)
             try? await github.removeLabel(repo: issue.repo, issueNumber: issue.number, label: "in-progress")
         }
 
-        try? await tmux.killPane(paneId)
+        if terminalLaunched {
+            try? await tmux.killPane(paneId)
+        }
         state.paneSlots.remove(at: paneIndex)
         try? await stateStore.save(state)
     }
@@ -347,7 +371,7 @@ final class DashboardViewModel: ObservableObject {
         let agent = state.paneSlots[paneIndex].agent
 
         try? await launcher.stop(paneId: paneId)
-        try? await launcher.launchTaskItem(paneId: paneId, agent: agent, taskItem: taskItem)
+        try? await launcher.launchTaskItem(paneId: paneId, paneIndex: paneIndex, agent: agent, taskItem: taskItem)
         state.paneSlots[paneIndex].status = .running
         try? await stateStore.save(state)
     }

@@ -7,104 +7,141 @@ struct PaneCardView: View {
     let onReturn: () -> Void
     let onComplete: () -> Void
     var onRestart: (() -> Void)?
+    let onDelete: () -> Void
+
+    private var paneLabel: String {
+        "Ponyo \(paneIndex + 1)"
+    }
+
+    private var taskSummary: String? {
+        guard let taskItem = slot.taskItem else { return nil }
+        if let issue = taskItem.issues.first {
+            return "\(issue.repo.name)-#\(issue.number) \(issue.title)"
+        }
+        return taskItem.displayName
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(slot.agent.displayName)
+        VStack(alignment: .leading, spacing: 6) {
+            // Header
+            HStack(spacing: 6) {
+                // Pane label
+                Text(paneLabel)
                     .font(.caption)
                     .fontWeight(.bold)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(slot.agent == .claudeCode ? Color.orange.opacity(0.2) : Color.purple.opacity(0.2))
-                    .cornerRadius(4)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(slot.isEmpty ? Color.secondary : agentColor)
+                    .cornerRadius(6)
+
+                if slot.taskItem != nil {
+                    Text(slot.agent.displayName)
+                        .font(.caption2)
+                        .foregroundStyle(agentColor)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(agentColor.opacity(0.15))
+                        .cornerRadius(4)
+                }
 
                 Spacer()
 
                 Circle()
                     .fill(statusColor)
-                    .frame(width: 10, height: 10)
-                Text(slot.status.rawValue)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .frame(width: 8, height: 8)
+
+                if slot.isEmpty {
+                    Button(action: onDelete) {
+                        Image(systemName: "xmark")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Remove Pane")
+                }
             }
 
-            if let taskItem = slot.taskItem {
-                if taskItem.isGroup {
-                    // Group display
-                    HStack(spacing: 4) {
-                        Image(systemName: "rectangle.stack.fill")
-                            .font(.caption2)
-                            .foregroundStyle(.orange)
-                        Text(taskItem.displayName)
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                    }
-                    ForEach(taskItem.issues) { issue in
-                        Text(issue.displayTitle)
+            if let summary = taskSummary {
+                // Task title — "Ponyo-#10 Add Notification for agent completion"
+                Text(summary)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .lineLimit(2)
+
+                // Group 이슈 목록
+                if let taskItem = slot.taskItem, taskItem.isGroup {
+                    ForEach(taskItem.issues.dropFirst()) { issue in
+                        Text("\(issue.repo.name)-#\(issue.number) \(issue.title)")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
-                } else if let issue = taskItem.issues.first {
-                    // Single issue display
-                    Text(issue.repo.name)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    Text(issue.displayTitle)
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                        .lineLimit(2)
-                    Text(issue.branchName)
-                        .font(.caption2)
-                        .foregroundStyle(.blue)
                 }
 
-                HStack {
-                    if slot.status == .crashed || slot.status == .idle {
-                        if let onRestart {
-                            Button(action: onRestart) {
-                                Label("Restart", systemImage: "arrow.clockwise")
-                                    .font(.caption)
-                            }
-                            .buttonStyle(.bordered)
-                            .tint(.orange)
+                // Action buttons
+                HStack(spacing: 6) {
+                    if let onRestart {
+                        Button(action: onRestart) {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.caption)
                         }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .help("Restart Agent")
                     }
 
                     Button(action: onReturn) {
-                        Label("Return", systemImage: "arrow.uturn.backward")
+                        Image(systemName: "arrow.uturn.backward")
                             .font(.caption)
                     }
                     .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help("Return to Today")
 
                     Button(action: onComplete) {
-                        Label("Done", systemImage: "xmark")
+                        Image(systemName: "checkmark")
                             .font(.caption)
                     }
                     .buttonStyle(.bordered)
-                    .tint(.red)
+                    .controlSize(.small)
+                    .tint(.green)
+                    .help("Complete")
+
+                    Spacer()
+
+                    Button(action: onDelete) {
+                        Image(systemName: "trash")
+                            .font(.caption2)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help("Remove Pane")
                 }
             } else {
                 VStack {
                     Image(systemName: "tray.and.arrow.down")
-                        .font(.title2)
+                        .font(.title3)
                         .foregroundStyle(.secondary)
                     Text("Drop task here")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                .frame(maxWidth: .infinity, minHeight: 60)
+                .frame(maxWidth: .infinity, minHeight: 50)
             }
         }
-        .padding(12)
+        .padding(10)
         .background(.background)
         .cornerRadius(10)
-        .shadow(color: .black.opacity(0.1), radius: 3, y: 2)
+        .shadow(color: .black.opacity(0.08), radius: 2, y: 1)
         .overlay(
             RoundedRectangle(cornerRadius: 10)
                 .stroke(statusBorderColor, lineWidth: slot.isEmpty ? 1 : 2)
         )
+    }
+
+    private var agentColor: Color {
+        slot.agent == .claudeCode ? .orange : .purple
     }
 
     private var statusColor: Color {

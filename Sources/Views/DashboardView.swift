@@ -3,37 +3,37 @@ import SwiftUI
 
 struct DashboardView: View {
     @ObservedObject var vm: DashboardViewModel
-    @State private var showOnboarding = false
 
     var body: some View {
         Group {
-            if showOnboarding {
-                OnboardingView(vm: vm, isPresented: $showOnboarding)
+            if !vm.isInitialized {
+                ProgressView("Loading...")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if vm.state.githubToken.isEmpty {
+                OnboardingView(vm: vm)
             } else {
-                HSplitView {
-                    RepoListView(vm: vm)
-                        .frame(minWidth: 220, maxWidth: 300)
+                VSplitView {
+                    HSplitView {
+                        RepoListView(vm: vm)
+                            .frame(minWidth: 200, maxWidth: 260)
 
-                    TodayTasksView(vm: vm)
-                        .frame(minWidth: 220, maxWidth: 320)
+                        TodayTasksView(vm: vm)
+                            .frame(minWidth: 200)
+                    }
+                    .frame(minHeight: 220)
 
                     PaneGridView(vm: vm)
-                        .frame(minWidth: 400)
+                        .frame(minHeight: 200)
                 }
                 .onReceive(vm.monitor.$paneInfos) { _ in
                     vm.syncPaneStatuses()
                 }
             }
         }
-        .onAppear {
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .task {
             NSApp.activate(ignoringOtherApps: true)
-            DispatchQueue.main.async {
-                NSApp.keyWindow?.makeKeyAndOrderFront(nil)
-            }
-            let hasToken = KeychainHelper.load(key: "github-token") != nil
-            if !hasToken {
-                showOnboarding = true
-            }
+            await vm.initialize()
         }
     }
 }

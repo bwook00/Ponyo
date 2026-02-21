@@ -9,6 +9,7 @@ struct AppState: Codable {
     var tmuxSession: String
     var terminalApp: String
     var githubUsername: String
+    var githubToken: String
 
     init(
         repos: [RepoConfig] = [],
@@ -17,7 +18,8 @@ struct AppState: Codable {
         paneSlots: [PaneSlot] = [],
         tmuxSession: String = "ponyo",
         terminalApp: String = "Ghostty",
-        githubUsername: String = ""
+        githubUsername: String = "",
+        githubToken: String = ""
     ) {
         self.repos = repos
         self.taskPool = taskPool
@@ -26,6 +28,7 @@ struct AppState: Codable {
         self.tmuxSession = tmuxSession
         self.terminalApp = terminalApp
         self.githubUsername = githubUsername
+        self.githubToken = githubToken
     }
 
     // 새 필드가 추가되어도 기존 JSON을 정상 로드하도록 커스텀 디코더
@@ -38,5 +41,6 @@ struct AppState: Codable {
         tmuxSession = try c.decodeIfPresent(String.self, forKey: .tmuxSession) ?? "ponyo"
         terminalApp = try c.decodeIfPresent(String.self, forKey: .terminalApp) ?? "Ghostty"
         githubUsername = try c.decodeIfPresent(String.self, forKey: .githubUsername) ?? ""
+        githubToken = try c.decodeIfPresent(String.self, forKey: .githubToken) ?? ""
     }
 }

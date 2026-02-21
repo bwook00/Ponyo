@@ -27,8 +27,8 @@ struct PonyoApp: App {
         let stateStore = StateStore()
         let monitor = PaneMonitor(tmux: tmux)
 
-        let token = KeychainHelper.load(key: "github-token") ?? ""
-        let github = GitHubService(token: token)
+        // 토큰은 state 파일에서 로드 (initialize에서 처리)
+        let github = GitHubService(token: "")
 
         let vm = DashboardViewModel(
             tmux: tmux, git: git, github: github,
@@ -38,15 +38,10 @@ struct PonyoApp: App {
     }
 
     var body: some Scene {
-        Window("Ponyo Dashboard", id: "dashboard") {
+        WindowGroup("Ponyo") {
             DashboardView(vm: vm)
-                .task { await vm.initialize() }
         }
         .defaultSize(width: 1100, height: 650)
-
-        MenuBarExtra("Ponyo", systemImage: "fish") {
-            MenuBarView(vm: vm)
-        }
 
         Settings {
             SettingsView(vm: vm)
