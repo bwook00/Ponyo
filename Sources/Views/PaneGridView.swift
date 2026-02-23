@@ -22,20 +22,13 @@ struct PaneGridView: View {
                 statusSummary
             }
 
-            // 가로 배치 — max 4 columns, wraps to next row
-            let columns = Array(repeating: GridItem(.flexible(minimum: 180), spacing: 12), count: min(max(vm.state.paneSlots.count, 1), 4))
+            // 3열 × 2행 고정 그리드 (최대 6 panes)
+            let columns = Array(repeating: GridItem(.flexible(minimum: 180), spacing: 12), count: 3)
 
             ScrollView {
                 LazyVGrid(columns: columns, spacing: 12) {
                     ForEach(Array(vm.state.paneSlots.enumerated()), id: \.element.id) { index, slot in
-                        PaneCardView(
-                            slot: slot,
-                            paneIndex: index,
-                            onReturn: { Task { await vm.returnToToday(paneIndex: index) } },
-                            onComplete: { Task { await vm.completeTask(paneIndex: index) } },
-                            onRestart: slot.taskItem != nil ? { Task { await vm.restartAgent(paneIndex: index) } } : nil,
-                            onDelete: { Task { await vm.removePane(at: index) } }
-                        )
+                        paneCard(slot: slot, index: index)
                         .dropDestination(for: String.self) { items, _ in
                             guard let taskItemId = items.first, slot.isEmpty else { return false }
                             pendingDrop = (taskItemId, index)
@@ -44,22 +37,24 @@ struct PaneGridView: View {
                         }
                     }
 
-                    Button(action: { Task { await vm.addPane() } }) {
-                        VStack {
-                            Image(systemName: "plus.rectangle")
-                                .font(.title2)
-                            Text("Add Pane")
-                                .font(.caption)
+                    if vm.state.paneSlots.count < DashboardViewModel.maxPanes {
+                        Button(action: { Task { await vm.addPane() } }) {
+                            VStack {
+                                Image(systemName: "plus.rectangle")
+                                    .font(.title2)
+                                Text("Add Pane")
+                                    .font(.caption)
+                            }
+                            .frame(maxWidth: .infinity, minHeight: 100)
+                            .background(.secondary.opacity(0.05))
+                            .cornerRadius(10)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(.secondary.opacity(0.2), style: StrokeStyle(lineWidth: 1, dash: [5]))
+                            )
                         }
-                        .frame(maxWidth: .infinity, minHeight: 100)
-                        .background(.secondary.opacity(0.05))
-                        .cornerRadius(10)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .stroke(.secondary.opacity(0.2), style: StrokeStyle(lineWidth: 1, dash: [5]))
-                        )
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
             }
         }
@@ -81,6 +76,30 @@ struct PaneGridView: View {
                 }
             )
         }
+    }
+
+    private static let gridColumns = 3
+
+    private func paneCard(slot: PaneSlot, index: Int) -> PaneCardView {
+        let count = vm.state.paneSlots.count
+        let cols = Self.gridColumns
+        let hasLeft = index % cols > 0
+        let hasRight = index % cols < cols - 1 && index + 1 < count
+        let hasUp = index >= cols
+        let hasDown = index + cols < count
+
+        return PaneCardView(
+            slot: slot,
+            paneIndex: index,
+            onReturn: { Task { await vm.returnToToday(paneIndex: index) } },
+            onComplete: { Task { await vm.completeTask(paneIndex: index) } },
+            onRestart: slot.taskItem != nil ? { Task { await vm.restartAgent(paneIndex: index) } } : nil,
+            onDelete: { Task { await vm.removePane(at: index) } },
+            onMoveLeft: hasLeft ? { Task { await vm.movePane(from: index, to: index - 1) } } : nil,
+            onMoveRight: hasRight ? { Task { await vm.movePane(from: index, to: index + 1) } } : nil,
+            onMoveUp: hasUp ? { Task { await vm.movePane(from: index, to: index - cols) } } : nil,
+            onMoveDown: hasDown ? { Task { await vm.movePane(from: index, to: index + cols) } } : nil
+        )
     }
 
     private var statusSummary: some View {

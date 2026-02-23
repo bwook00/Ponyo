@@ -8,6 +8,10 @@ struct PaneCardView: View {
     let onComplete: () -> Void
     var onRestart: (() -> Void)?
     let onDelete: () -> Void
+    var onMoveLeft: (() -> Void)?
+    var onMoveRight: (() -> Void)?
+    var onMoveUp: (() -> Void)?
+    var onMoveDown: (() -> Void)?
 
     private var paneLabel: String {
         "Ponyo \(paneIndex + 1)"
@@ -15,6 +19,9 @@ struct PaneCardView: View {
 
     private var taskSummary: String? {
         guard let taskItem = slot.taskItem else { return nil }
+        if taskItem.isManual {
+            return taskItem.displayName
+        }
         if let issue = taskItem.issues.first {
             return "\(issue.repo.name)-#\(issue.number) \(issue.title)"
         }
@@ -34,6 +41,9 @@ struct PaneCardView: View {
                     .padding(.vertical, 3)
                     .background(slot.isEmpty ? Color.secondary : agentColor)
                     .cornerRadius(6)
+
+                // Move arrows
+                moveButtons
 
                 if slot.taskItem != nil {
                     Text(slot.agent.displayName)
@@ -140,8 +150,50 @@ struct PaneCardView: View {
         )
     }
 
+    @ViewBuilder
+    private var moveButtons: some View {
+        HStack(spacing: 2) {
+            if let onMoveLeft {
+                Button(action: onMoveLeft) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 9, weight: .bold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Move Left")
+            }
+            if let onMoveUp {
+                Button(action: onMoveUp) {
+                    Image(systemName: "chevron.up")
+                        .font(.system(size: 9, weight: .bold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Move Up")
+            }
+            if let onMoveDown {
+                Button(action: onMoveDown) {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 9, weight: .bold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Move Down")
+            }
+            if let onMoveRight {
+                Button(action: onMoveRight) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .bold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Move Right")
+            }
+        }
+    }
+
     private var agentColor: Color {
-        slot.agent == .claudeCode ? .orange : .purple
+        slot.agent == .claudeCode ? .orange : .blue
     }
 
     private var statusColor: Color {

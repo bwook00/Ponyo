@@ -31,6 +31,11 @@ struct AgentLauncher {
 
     /// TaskItem (그룹 포함) — 레포로 cd + agent만 실행
     func launchTaskItem(paneId: String, paneIndex: Int, agent: Agent, taskItem: TaskItem) async throws {
+        if taskItem.isManual {
+            try await launchManualTask(paneId: paneId, paneIndex: paneIndex, agent: agent, taskItem: taskItem)
+            return
+        }
+
         if taskItem.isSingle, let issue = taskItem.issues.first {
             try await launch(paneId: paneId, paneIndex: paneIndex, agent: agent, issue: issue)
             return
@@ -47,6 +52,21 @@ struct AgentLauncher {
 
         let issueList = taskItem.issues.map { "\($0.repo.name)-#\($0.number)" }.joined(separator: ", ")
         let title = "🐟 Ponyo \(paneIndex + 1): \(taskItem.displayName) [\(issueList)]"
+        try await tmux.setPaneTitle(paneId, title: title)
+    }
+
+    /// 수동 태스크 — workingDirectory (또는 ~)로 cd → agent 실행
+    private func launchManualTask(paneId: String, paneIndex: Int, agent: Agent, taskItem: TaskItem) async throws {
+        guard let manual = taskItem.manualTask else { return }
+        let dir = manual.workingDirectory ?? "~"
+
+        try await tmux.sendKeys(paneId, keys: "cd \(dir)")
+        try await Task.sleep(for: .milliseconds(500))
+        try await tmux.sendKeys(paneId, keys: "clear")
+        try await Task.sleep(for: .milliseconds(300))
+        try await tmux.sendKeys(paneId, keys: agent.command)
+
+        let title = "🐟 Ponyo \(paneIndex + 1): \(manual.title)"
         try await tmux.setPaneTitle(paneId, title: title)
     }
 

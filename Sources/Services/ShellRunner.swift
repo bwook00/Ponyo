@@ -7,11 +7,21 @@ struct ShellError: Error {
 }
 
 actor ShellRunner {
-    /// AI agent 환경변수를 제거한 클린 환경
+    /// AI agent 환경변수를 제거하고 Homebrew PATH를 보장하는 클린 환경
+    /// (macOS GUI 앱은 Finder에서 실행 시 PATH가 /usr/bin:/bin 등 최소값만 가짐)
     private static let cleanEnv: [String: String] = {
         var env = ProcessInfo.processInfo.environment
         env.removeValue(forKey: "CLAUDECODE")
         env.removeValue(forKey: "CLAUDE_CODE")
+        if let path = env["PATH"] {
+            var newPath = path
+            for dir in ["/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin"] {
+                if !newPath.contains(dir) {
+                    newPath = "\(dir):\(newPath)"
+                }
+            }
+            env["PATH"] = newPath
+        }
         return env
     }()
 

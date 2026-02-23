@@ -5,6 +5,7 @@ struct TodayTasksView: View {
     @ObservedObject var vm: DashboardViewModel
     @State private var selectedIds: Set<String> = []
     @State private var showGroupSheet = false
+    @State private var showManualTaskSheet = false
     @State private var groupName = ""
 
     var body: some View {
@@ -22,6 +23,13 @@ struct TodayTasksView: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
                 }
+                Button(action: { showManualTaskSheet = true }) {
+                    Image(systemName: "plus")
+                        .font(.caption)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Add manual task")
                 Text("\(vm.state.todayTasks.count)")
                     .font(.caption)
                     .foregroundStyle(.white)
@@ -80,6 +88,19 @@ struct TodayTasksView: View {
                 onCancel: { showGroupSheet = false }
             )
         }
+        .sheet(isPresented: $showManualTaskSheet) {
+            ManualTaskSheet(
+                onCreate: { title, description, workingDirectory in
+                    vm.addManualTask(
+                        title: title,
+                        description: description,
+                        workingDirectory: workingDirectory
+                    )
+                    showManualTaskSheet = false
+                },
+                onCancel: { showManualTaskSheet = false }
+            )
+        }
     }
 
     private func toggleSelection(_ id: String) {
@@ -111,7 +132,22 @@ struct TodayTaskCard: View {
             .padding(.top, 2)
 
             VStack(alignment: .leading, spacing: 4) {
-                if item.isGroup {
+                if item.isManual {
+                    // Manual task
+                    HStack(spacing: 4) {
+                        Text("Manual")
+                            .font(.caption2)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(.purple.opacity(0.15))
+                            .cornerRadius(3)
+                        Spacer()
+                    }
+                    Text(item.displayName)
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .lineLimit(2)
+                } else if item.isGroup {
                     // Group header
                     HStack(spacing: 4) {
                         Image(systemName: "rectangle.stack.fill")
@@ -190,6 +226,54 @@ struct TodayTaskCard: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(isSelected ? Color.accentColor.opacity(0.3) : .clear, lineWidth: 1)
         )
+    }
+}
+
+// MARK: - Manual Task Sheet
+
+struct ManualTaskSheet: View {
+    let onCreate: (String, String, String?) -> Void
+    let onCancel: () -> Void
+
+    @State private var title = ""
+    @State private var description = ""
+    @State private var workingDirectory = ""
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Text("Add Manual Task")
+                .font(.headline)
+            Text("Create a task not tied to a GitHub issue")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 8) {
+                TextField("Title (required)", text: $title)
+                    .textFieldStyle(.roundedBorder)
+
+                TextField("Description (optional)", text: $description, axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                    .lineLimit(3...5)
+
+                TextField("Working directory (optional, default: ~)", text: $workingDirectory)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.caption)
+            }
+
+            HStack {
+                Button("Cancel", action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                Button("Add Task") {
+                    let dir = workingDirectory.isEmpty ? nil : workingDirectory
+                    onCreate(title, description, dir)
+                }
+                .disabled(title.isEmpty)
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(24)
+        .frame(width: 360)
     }
 }
 

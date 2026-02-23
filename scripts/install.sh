@@ -86,5 +86,9 @@ codesign --force --sign - --entitlements "${PROJECT_DIR}/Ponyo.entitlements" "${
 codesign --force --sign - "${APP_DIR}"
 
 echo "Done! Installed to ${APP_DIR}"
+
+# 이전 버전이 실행 중이면 종료 (macOS가 옛 바이너리를 재사용하는 문제 방지)
+killall "${APP_NAME}" 2>/dev/null && sleep 0.5 || true
+
 echo "Opening ${APP_NAME}..."
 open "${APP_DIR}"

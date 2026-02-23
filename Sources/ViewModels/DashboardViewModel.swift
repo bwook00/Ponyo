@@ -9,6 +9,9 @@ final class DashboardViewModel: ObservableObject {
     @Published var isLoadingRepos = false
     @Published var terminalLaunched = false
     @Published var isInitialized = false
+    private var isMovingPane = false
+
+    static let maxPanes = 6
 
     let tmux: TmuxService
     let git: GitService
@@ -39,6 +42,9 @@ final class DashboardViewModel: ObservableObject {
         if let loaded = try? await stateStore.load() {
             state = loaded
         }
+
+        // tmux 세션이 살아있으면 terminalLaunched 복원
+        terminalLaunched = (try? await tmux.sessionExists()) == true
 
         isInitialized = true
 
@@ -71,27 +77,29 @@ final class DashboardViewModel: ObservableObject {
 
     /// Ghostty + tmux 세션을 새로 만들고 pane 세팅 (기존 task 할당 유지)
     func launchTerminal() async {
-        // 1. 기존 세션 죽이고 새로 생성
-        let exists = (try? await tmux.sessionExists()) ?? false
-        if exists {
+        // 1. 기존 세션 확실히 죽이고 새로 생성
+        let session = state.tmuxSession
+        for _ in 0..<3 {
+            guard (try? await tmux.sessionExists()) == true else { break }
             try? await tmux.killSession()
+            try? await Task.sleep(for: .milliseconds(200))
         }
-        try? await tmux.createSession()
+        let firstPaneId = try? await tmux.createSession()
 
-        // 2. 기존 task 할당 보존
+        // 2. 새 pane 슬롯을 로컬에서 먼저 구성 (state를 건드리지 않음)
         let savedSlots = state.paneSlots
-        let paneCount = max(savedSlots.count, 4)
-        state.paneSlots.removeAll()
+        let paneCount = min(savedSlots.isEmpty ? 4 : savedSlots.count, Self.maxPanes)
+        var newSlots: [PaneSlot] = []
 
-        // 세션 생성 시 자동 생성된 첫 pane
-        if let panes = try? await tmux.listPanes(), let first = panes.first {
-            var slot = PaneSlot(paneId: first.id, agent: .claudeCode)
+        // 세션 생성 시 자동 생성된 첫 pane (createSession이 직접 ID 반환)
+        if let paneId = firstPaneId {
+            var slot = PaneSlot(paneId: paneId, agent: .claudeCode)
             if savedSlots.indices.contains(0) {
                 slot.taskItem = savedSlots[0].taskItem
                 slot.agent = savedSlots[0].agent
                 slot.status = savedSlots[0].taskItem != nil ? .running : .idle
             }
-            state.paneSlots.append(slot)
+            newSlots.append(slot)
         }
 
         // 나머지 pane 추가
@@ -103,25 +111,29 @@ final class DashboardViewModel: ObservableObject {
                     slot.agent = savedSlots[i].agent
                     slot.status = savedSlots[i].taskItem != nil ? .running : .idle
                 }
-                state.paneSlots.append(slot)
+                newSlots.append(slot)
             } else {
                 break
             }
         }
+
+        // 3. state를 한 번에 갱신 (UI 깜빡임 방지, 실패 시 기존 데이터 보존)
+        state.paneSlots = newSlots
         try? await stateStore.save(state)
 
-        // 3. Ghostty 실행
+        // 4. Ghostty 실행 — TmuxService가 찾은 절대경로 재사용
         let shell = ShellRunner()
-        let session = state.tmuxSession
+        let tmuxPath = await tmux.tmuxPath()
         try? await shell.launch(
             "/Applications/Ghostty.app/Contents/MacOS/ghostty",
-            arguments: ["-e", "/bin/sh", "-c", "tmux attach -t \(session)"]
+            arguments: ["-e", tmuxPath, "attach", "-t", session]
         )
 
         terminalLaunched = true
 
-        // 4. 각 pane에 타이틀 설정 + task 할당된 pane에 agent 재실행
+        // 5. Ghostty 창이 열린 후 최종 레이아웃 적용 + 타이틀/agent 실행
         try? await Task.sleep(for: .seconds(1))
+        await tmux.applyLayout()
         for i in state.paneSlots.indices {
             if let taskItem = state.paneSlots[i].taskItem {
                 let paneId = state.paneSlots[i].paneId
@@ -155,12 +167,12 @@ final class DashboardViewModel: ObservableObject {
         state.repos.removeAll { $0.id == repo.id }
         state.taskPool.removeAll { $0.repo.id == repo.id }
         state.todayTasks.removeAll { item in
-            item.issues.allSatisfy { $0.repo.id == repo.id }
+            !item.isManual && item.issues.allSatisfy { $0.repo.id == repo.id }
         }
         for i in state.todayTasks.indices {
             state.todayTasks[i].issues.removeAll { $0.repo.id == repo.id }
         }
-        state.todayTasks.removeAll { $0.issues.isEmpty }
+        state.todayTasks.removeAll { !$0.isManual && $0.issues.isEmpty }
         try? await stateStore.save(state)
     }
 
@@ -263,18 +275,28 @@ final class DashboardViewModel: ObservableObject {
         Task { try? await stateStore.save(state) }
     }
 
+    func addManualTask(title: String, description: String, workingDirectory: String?) {
+        let manual = ManualTask(
+            title: title,
+            description: description,
+            workingDirectory: workingDirectory
+        )
+        let item = TaskItem(manualTask: manual)
+        state.todayTasks.append(item)
+        Task { try? await stateStore.save(state) }
+    }
+
     // MARK: - Pane Management (Step 2: Assign)
 
     func addPane() async {
-        if terminalLaunched {
-            if let paneId = try? await tmux.createPane() {
-                state.paneSlots.append(PaneSlot(paneId: paneId, agent: .claudeCode))
-                try? await stateStore.save(state)
-            }
+        guard state.paneSlots.count < Self.maxPanes else { return }
+        if terminalLaunched, let paneId = try? await tmux.createPane() {
+            state.paneSlots.append(PaneSlot(paneId: paneId, agent: .claudeCode))
         } else {
+            // 터미널 미실행 또는 tmux pane 생성 실패 시 pending으로 추가
             state.paneSlots.append(PaneSlot(paneId: "pending-\(UUID().uuidString.prefix(8))", agent: .claudeCode))
-            try? await stateStore.save(state)
         }
+        try? await stateStore.save(state)
     }
 
     /// Pane 삭제
@@ -315,9 +337,11 @@ final class DashboardViewModel: ObservableObject {
             try? await launcher.launchTaskItem(paneId: paneId, paneIndex: index, agent: agent, taskItem: taskItem)
         }
 
-        // GitHub 라벨 추가
-        for issue in taskItem.issues {
-            try? await github.addLabel(repo: issue.repo, issueNumber: issue.number, label: "in-progress")
+        // GitHub 라벨 추가 (수동 태스크는 스킵)
+        if !taskItem.isManual {
+            for issue in taskItem.issues {
+                try? await github.addLabel(repo: issue.repo, issueNumber: issue.number, label: "in-progress")
+            }
         }
 
         try? await stateStore.save(state)
@@ -335,8 +359,10 @@ final class DashboardViewModel: ObservableObject {
         state.paneSlots[paneIndex].taskItem = nil
         state.paneSlots[paneIndex].status = .idle
 
-        for issue in taskItem.issues {
-            try? await github.removeLabel(repo: issue.repo, issueNumber: issue.number, label: "in-progress")
+        if !taskItem.isManual {
+            for issue in taskItem.issues {
+                try? await github.removeLabel(repo: issue.repo, issueNumber: issue.number, label: "in-progress")
+            }
         }
 
         try? await stateStore.save(state)
@@ -350,14 +376,38 @@ final class DashboardViewModel: ObservableObject {
         let paneId = state.paneSlots[paneIndex].paneId
         try? await launcher.stop(paneId: paneId)
 
-        for issue in taskItem.issues {
-            try? await github.removeLabel(repo: issue.repo, issueNumber: issue.number, label: "in-progress")
+        if !taskItem.isManual {
+            for issue in taskItem.issues {
+                try? await github.removeLabel(repo: issue.repo, issueNumber: issue.number, label: "in-progress")
+            }
         }
 
         if terminalLaunched {
             try? await tmux.killPane(paneId)
         }
         state.paneSlots.remove(at: paneIndex)
+        try? await stateStore.save(state)
+    }
+
+    // MARK: - Pane Move
+
+    func movePane(from: Int, to: Int) async {
+        guard !isMovingPane,
+              from != to,
+              state.paneSlots.indices.contains(from),
+              state.paneSlots.indices.contains(to) else { return }
+
+        isMovingPane = true
+        defer { isMovingPane = false }
+
+        let paneId1 = state.paneSlots[from].paneId
+        let paneId2 = state.paneSlots[to].paneId
+
+        state.paneSlots.swapAt(from, to)
+
+        if terminalLaunched {
+            try? await tmux.swapPanes(paneId1, paneId2)
+        }
         try? await stateStore.save(state)
     }
 
